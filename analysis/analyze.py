@@ -37,6 +37,7 @@ def merge(k6, cw):
 def summarize(name, m, price):
     k = m.dropna(subset=['rps'])
     w = m[(m['minute'] >= k['minute'].min()) & (m['minute'] <= k['minute'].max())]
+    w = w.fillna(0)
     peak = k[k['rps'] >= 0.8 * k['rps'].max()]
     hours = w['in_service'].sum() / 60.0
     row = {
@@ -82,7 +83,8 @@ def plot_vs_instances(all_m, outdir):
         ax.scatter(k['in_service'], k['p95_ms'], alpha=0.5, label=f'{name} (each dot = 1 minute)')
         med = k.groupby('in_service')['p95_ms'].median()
         ax.plot(med.index, med.values, marker='o')
-        top = max(top, int(k['in_service'].max()))
+        max_val = k['in_service'].max()
+        top = max(top, int(max_val) if pd.notna(max_val) else 0)
     ax.set_xticks(range(1, top + 1))
     ax.set_xlabel('Instances in service')
     ax.set_ylabel('p95 response time per minute (ms)')
