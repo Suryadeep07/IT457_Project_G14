@@ -29,6 +29,8 @@ def load_cw(path):
 
 def merge(k6, cw):
     m = pd.merge(k6, cw, on='minute', how='outer').sort_values('minute')
+    if m['in_service'].isna().all() and 'healthy_hosts' in m.columns:
+        m['in_service'] = m['healthy_hosts']
     m['in_service'] = m['in_service'].ffill()
     m['desired'] = m['desired'].ffill()
     m['t_min'] = (m['minute'] - k6['minute'].min()) / 60.0
