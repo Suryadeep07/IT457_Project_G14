@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holiday Stays Scaling PoC</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5b6475; --line: #dde1e8;
+    --accent: #c2410c; --accent-soft: #fff1e8; --ok: #1a7f45; --err: #b3261e; --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #13161b; --card: #1c2027; --text: #e6e9ef; --muted: #9aa3b2; --line: #2d323b;
+      --accent: #fb923c; --accent-soft: #2a1d14; --ok: #5cc98a; --err: #ff8a80; --chip: #262b33;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 16px 48px; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 4px; }
+  p.sub, p.hint { color: var(--muted); margin: 0; }
+  p.hint { font-size: .9rem; margin-bottom: 16px; }
+  .health { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--chip); font-size: .85rem; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.err { background: var(--err); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--accent); cursor: pointer; background: var(--accent); color: #fff; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .55; cursor: wait; }
+  label { color: var(--muted); font-size: .9rem; }
+  input[type=range] { width: 220px; accent-color: var(--accent); }
+  select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
+  .listing { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .listing .title { font-weight: 600; }
+  .listing .price { color: var(--accent); font-weight: 700; font-size: 1.1rem; margin-top: 6px; }
+  .listing .id { color: var(--muted); font-size: .8rem; font-family: ui-monospace, Menlo, monospace; }
+  .result { margin-top: 16px; padding: 14px; border-radius: 10px; background: var(--accent-soft); }
+  .big { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 10px 0 0; font-size: .92rem; }
+  dt { color: var(--muted); } dd { margin: 0; font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+  .meta { margin-top: 12px; font-size: .85rem; color: var(--muted); }
+  .meta code, td code { font-family: ui-monospace, Menlo, monospace; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: .92rem; }
+  th, td { text-align: left; padding: 7px 4px; border-bottom: 1px solid var(--line); }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .error { color: var(--err); font-weight: 600; margin-top: 12px; }
+  footer { color: var(--muted); font-size: .85rem; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Holiday Stays</h1>
+      <p class="sub">Dec–Jan peak rush demo: a stateless listing and pricing service behind a load balancer.</p>
+    </div>
+    <span class="health" id="health"><span class="dot" id="health-dot"></span><span id="health-text">Checking service…</span></span>
+  </header>
+
+  <section class="card">
+    <h2>Listings</h2>
+    <p class="hint">Calls <code>GET /listings</code>, a light endpoint with almost no CPU work.</p>
+    <button id="load-listings">Load listings</button>
+    <div class="grid" id="listings"></div>
+    <p class="meta" id="listings-meta" hidden></p>
+    <p class="error" id="listings-error" hidden></p>
+  </section>
+
+  <section class="card">
+    <h2>Holiday pricing</h2>
+    <p class="hint">Calls <code>GET /search-pricing?n=…</code>. Each request runs <em>n</em> SHA-256 rounds to simulate surge-pricing work, which is what drives CPU and scaling.</p>
+    <div class="row">
+      <label for="work">Work per request (n)</label>
+      <input type="range" id="work" min="10000" max="300000" step="10000" value="100000">
+      <strong id="work-value">1,00,000</strong>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="get-price">Get holiday price</button>
+    </div>
+    <div class="result" id="price" hidden>
+      <div class="big" id="price-rate"></div>
+      <div id="price-sub"></div>
+      <dl>
+        <dt>Surge multiplier</dt><dd id="price-surge"></dd>
+        <dt>Server work time</dt><dd id="price-work"></dd>
+        <dt>Round trip</dt><dd id="price-rtt"></dd>
+        <dt>Served by</dt><dd id="price-instance"></dd>
+      </dl>
+    </div>
+    <p class="error" id="price-error" hidden></p>
+  </section>
+
+  <section class="card">
+    <h2>Rush test</h2>
+    <p class="hint">Sends many pricing requests at once and shows which instances answered. With more than one instance in service, the load balancer spreads them out.</p>
+    <div class="row">
+      <label for="burst-size">Requests</label>
+      <select id="burst-size">
+        <option>10</option>
+        <option selected>20</option>
+        <option>50</option>
+      </select>
+      <button class="secondary" id="burst">Send burst</button>
+    </div>
+    <div id="tally" hidden>
+      <table>
+        <thead><tr><th>Instance</th><th class="num">Requests</th><th class="num">Avg round trip</th><th class="num">Avg work</th></tr></thead>
+        <tbody id="tally-body"></tbody>
+      </table>
+      <p class="meta" id="tally-note"></p>
+    </div>
+  </section>
+
+  <footer>All data comes live from this service's API. Prices are in Indian rupees.</footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
+const num = new Intl.NumberFormat("en-IN");
+
+async function getJSON(path) {
+  const t0 = performance.now();
+  try {
+    const res = await fetch(path, { cache: "no-store" });
+    const rtt = performance.now() - t0;
+    if (!res.ok) return { ok: false, rtt, error: "HTTP " + res.status };
+    return { ok: true, rtt, data: await res.json() };
+  } catch (e) {
+    return { ok: false, rtt: performance.now() - t0, error: String(e) };
+  }
+}
+
+function showError(id, msg) {
+  $(id).textContent = msg;
+  $(id).hidden = !msg;
+}
+
+async function checkHealth() {
+  const r = await getJSON("/health");
+  $("health-dot").className = "dot " + (r.ok ? "ok" : "err");
+  $("health-text").textContent = r.ok
+    ? `Healthy · ${r.data.service} · ${r.data.instance}`
+    : "Service unreachable";
+}
+
+$("load-listings").addEventListener("click", async (ev) => {
+  ev.target.disabled = true;
+  const r = await getJSON("/listings");
+  ev.target.disabled = false;
+  const grid = $("listings");
+  grid.replaceChildren();
+  if (!r.ok) { showError("listings-error", "Could not load listings: " + r.error); $("listings-meta").hidden = true; return; }
+  showError("listings-error", "");
+  for (const l of r.data.listings) {
+    const card = document.createElement("div");
+    card.className = "listing";
+    const title = document.createElement("div"); title.className = "title"; title.textContent = l.title;
+    const price = document.createElement("div"); price.className = "price"; price.textContent = inr.format(l.base_price_inr) + " / night";
+    const id = document.createElement("div"); id.className = "id"; id.textContent = l.id;
+    card.append(title, price, id);
+    grid.append(card);
+  }
+  const meta = $("listings-meta");
+  meta.replaceChildren("Served by ", Object.assign(document.createElement("code"), { textContent: r.data.instance }),
+    ` (${r.data.service}) in ${Math.round(r.rtt)} ms`);
+  meta.hidden = false;
+});
+
+$("work").addEventListener("input", (ev) => { $("work-value").textContent = num.format(ev.target.value); });
+
+$("get-price").addEventListener("click", async (ev) => {
+  ev.target.disabled = true;
+  const r = await getJSON("/search-pricing?n=" + $("work").value);
+  ev.target.disabled = false;
+  if (!r.ok) { $("price").hidden = true; showError("price-error", "Pricing failed: " + r.error); return; }
+  showError("price-error", "");
+  const d = r.data;
+  $("price-rate").textContent = inr.format(d.computed_nightly_rate_inr) + " / night";
+  $("price-sub").textContent = `${d.recommended_listing} · ${d.holiday_season}`;
+  $("price-surge").textContent = "× " + d.surge_multiplier;
+  $("price-work").textContent = `${d.work_ms} ms (${num.format(d.iterations)} rounds)`;
+  $("price-rtt").textContent = Math.round(r.rtt) + " ms";
+  $("price-instance").textContent = d.instance;
+  $("price").hidden = false;
+});
+
+$("burst").addEventListener("click", async (ev) => {
+  ev.target.disabled = true;
+  const n = Number($("burst-size").value);
+  const path = "/search-pricing?n=" + $("work").value;
+  const results = await Promise.all(Array.from({ length: n }, () => getJSON(path)));
+  ev.target.disabled = false;
+  const byInstance = new Map();
+  let failed = 0;
+  for (const r of results) {
+    if (!r.ok) { failed++; continue; }
+    const row = byInstance.get(r.data.instance) || { n: 0, rtt: 0, work: 0 };
+    row.n++; row.rtt += r.rtt; row.work += r.data.work_ms;
+    byInstance.set(r.data.instance, row);
+  }
+  const body = $("tally-body");
+  body.replaceChildren();
+  for (const [instance, row] of [...byInstance].sort((a, b) => b[1].n - a[1].n)) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.append(Object.assign(document.createElement("code"), { textContent: instance }));
+    const cells = [row.n, Math.round(row.rtt / row.n) + " ms", Math.round(row.work / row.n) + " ms"].map((v) => {
+      const td = document.createElement("td"); td.className = "num"; td.textContent = v; return td;
+    });
+    tr.append(name, ...cells);
+    body.append(tr);
+  }
+  $("tally-note").textContent = `${byInstance.size} instance(s) answered` + (failed ? `, ${failed} request(s) failed.` : ".");
+  $("tally").hidden = false;
+});
+
+checkHealth();
+</script>
+</body>
+</html>
