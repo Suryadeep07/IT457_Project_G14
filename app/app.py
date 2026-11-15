@@ -2,7 +2,7 @@ import hashlib
 import os
 import socket
 import time
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 app = Flask(__name__)
 
@@ -10,6 +10,10 @@ MAX_WORK = int(os.environ.get('MAX_WORK', '1000000'))
 DEFAULT_WORK = int(os.environ.get('DEFAULT_WORK', '200000'))
 INSTANCE = os.environ.get('INSTANCE_ID') or socket.gethostname()
 SERVICE_ROLE = os.environ.get('SERVICE_ROLE', 'unified-monolith')
+
+@app.get('/')
+def index():
+    return send_from_directory(app.static_folder, 'index.html')
 
 @app.get('/health')
 def health():
